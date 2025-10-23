@@ -122,7 +122,8 @@ head(stopwords_argentinismos, 20)
 
 # Falta:
 # - Lematización (revisar, no cambia mucho)
-# - Quitar nombres (revisar importantes, como Chirri->amigo,Nina->hija, Mercedes->hogar/casa)
+# - Quitar nombres (revisar importantes, como Chirri->amigo, Nina->hija, 
+#     Mercedes->hogar/casa, Totin->perro, Cristina->esposa)
 # - Quitar palabras argentinas (puede o no, depende si al final hay suficientes palabras)
 #   - Web scapping de página (procesar minusculas, acentos y eso)
 # - Preguntar Ignacio si cuentos muy largos afectan
@@ -159,8 +160,6 @@ lista_palabras <- union(lista_palabras1, lista_palabras2)
 lista_palabras <- c(lista_palabras,"mientras")
 cuentos<-tm_map(cuentos, removeWords, lista_palabras)
 
-# proximo miércoles hay actividad
-
 # TODO cambiar esta parte
 # Expresiones regulares para cambiar "miniseriedeTV" por "miniserie tv"
 toTV <- content_transformer(function(x, pattern) {return (gsub(pattern, 'tv', x))})
@@ -169,7 +168,7 @@ sinopsis<-tm_map(sinopsis,toTV,"miniseriedetv")
 sinopsis<-tm_map(sinopsis,toTV,"miniserie tv")
 sinopsis[[101]]$content
 
-# Lematizar (modelo de udp ya descargado sección previa)
+# Lematizar (TODO: modelo de udp ya descargado sección previa)
 # Convertir corpus a data.frame temporal
 texto_df <- data.frame(texto = sapply(cuentos, as.character), stringsAsFactors = FALSE)
 
