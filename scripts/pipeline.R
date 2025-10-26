@@ -20,8 +20,7 @@
 # Buenas prácticas
 rm(list = ls())
 
-# NOTA: CAMBIAR DIRECTORIO
-# setwd("C:/Users/Asuar/OneDrive/Escritorio/Libros Clases/Economía/Ciencia Datos y Econometria/Taller3-blog_casciari")
+setwd("~/Desktop/Taller 1 - BigData")
 
 # Librerías
 require(pacman)
@@ -29,7 +28,7 @@ p_load(tidyverse, stringr, dplyr, stringi, tm, stopwords, tokenizers) #TODO para
 p_load(rvest, udpipe) # para web scrapping
 
 # Datos y primera visualización
-db <- read.csv("stores/blog_casciari.csv")
+db <- read.csv("blog_casciari.csv")
 head(db)
 
 
@@ -68,32 +67,48 @@ db %>%
 # Web scrapping stopwords argentinas
 # =============================================================
 
-# Leer la página web
-url <- "https://www.lifeder.com/frases-palabras-argentinas/"
-
-# Si esta URL falla, podrías usar otra fuente de expresiones argentinas:
-# url <- "https://languagetool.org/insights/es/publicacion/palabras-argentinas/"
-
-page <- read_html(url)
-
-# Extraer los nodos que contienen las palabras/expresiones
-palabras_raw <- page %>%
-  html_nodes("strong, b") %>%      # selecciona etiquetas strong o b
-  html_text() %>%
-  str_trim()
-
-# Filtrar y procesar; minuscula, duplicacdos, puntuación, 
-palabras_filt <- palabras_raw %>%
-  tolower() %>%
-  unique() %>%
-  # quitar puntuación
-  str_replace_all("[[:punct:]]", "")
+# Leer la página web con manejo de errores
+tryCatch({
+  url <- "https://www.lifeder.com/frases-palabras-argentinas/"
   
+  # Si esta URL falla, podrías usar otra fuente de expresiones argentinas:
+  # url <- "https://languagetool.org/insights/es/publicacion/palabras-argentinas/"
+  
+  page <- read_html(url)
+  
+  # Extraer los nodos que contienen las palabras/expresiones
+  palabras_raw <- page %>%
+    html_nodes("strong, b") %>%      # selecciona etiquetas strong o b
+    html_text() %>%
+    str_trim()
+  
+  # Filtrar y procesar; minuscula, duplicados, puntuación, 
+  palabras_filt <- palabras_raw %>%
+    tolower() %>%
+    unique() %>%
+    # quitar puntuación
+    str_replace_all("[[:punct:]]", "") %>%
+    .[. != ""]  # eliminar strings vacíos
+  
+  cat("Palabras argentinas extraídas:", length(palabras_filt), "\n")
+  
+}, error = function(e) {
+  cat("Error en web scraping, usando lista predefinida\n")
+  # Lista de backup con expresiones argentinas comunes
+  palabras_filt <- c("che", "boludo", "pibe", "mina", "laburo", "guita", "quilombo", 
+                     "bondi", "fiaca", "chabon", "mango", "faso", "morfi", "birra")
+})
 
 # Lematización usando udpipe
-# Descargar y cargar modelo español
-ud_model_file <- udpipe_download_model(language = "spanish")
-ud_model <- udpipe_load_model(ud_model_file$file_model)
+# Descargar y cargar modelo español (verificar si ya existe)
+if(!file.exists("spanish-gsd-ud-2.5-191206.udpipe")) {
+  cat("Descargando modelo udpipe español...\n")
+  ud_model_file <- udpipe_download_model(language = "spanish")
+  ud_model <- udpipe_load_model(ud_model_file$file_model)
+} else {
+  cat("Cargando modelo udpipe existente...\n")
+  ud_model <- udpipe_load_model("spanish-gsd-ud-2.5-191206.udpipe")
+}
 
 # Crear data frame para lematizar
 df_arg <- data.frame(token = palabras_filt, stringsAsFactors = FALSE)
@@ -113,7 +128,7 @@ palabras_lemma <- anot_arg %>%
 stopwords_arg <- palabras_lemma
 
 # Ver primeras 20
-head(stopwords_argentinismos, 20)
+head(stopwords_arg, 20)
 
 
 # =============================================================
@@ -164,13 +179,23 @@ cuentos<-tm_map(cuentos, removeWords, lista_palabras)
 # Expresiones regulares para cambiar "miniseriedeTV" por "miniserie tv"
 toTV <- content_transformer(function(x, pattern) {return (gsub(pattern, 'tv', x))})
 
-sinopsis<-tm_map(sinopsis,toTV,"miniseriedetv")
-sinopsis<-tm_map(sinopsis,toTV,"miniserie tv")
-sinopsis[[101]]$content
+# CORRECCIÓN DEL ERROR: Cambiar 'sinopsis' por 'cuentos'
+cuentos <- tm_map(cuentos, toTV, "miniseriedetv")
+cuentos <- tm_map(cuentos, toTV, "miniserie tv")
+
+# Verificar contenido (ajustar índice si hay menos de 101 documentos)
+if(length(cuentos) >= 101) {
+  cuentos[[101]]$content
+} else {
+  cat("Menos de 101 documentos. Mostrando el último:\n")
+  print(cuentos[[length(cuentos)]]$content)
+}
 
 # Lematizar (TODO: modelo de udp ya descargado sección previa)
 # Convertir corpus a data.frame temporal
 texto_df <- data.frame(texto = sapply(cuentos, as.character), stringsAsFactors = FALSE)
+
+cat("Procesando", nrow(texto_df), "documentos con udpipe...\n")
 
 # Procesar con udpipe
 anotaciones <- udpipe_annotate(ud_model, x = texto_df$texto)
@@ -179,7 +204,7 @@ anotaciones <- as.data.frame(anotaciones)
 # Usar solo las lemas (en minúsculas)
 cuentos_lematizados <- anotaciones %>%
   group_by(doc_id) %>%
-  summarise(texto = paste(lemma, collapse = " ")) %>%
+  summarise(texto = paste(lemma, collapse = " "), .groups = "drop") %>%
   pull(texto)
 
 # Volver a objeto Corpus
@@ -187,6 +212,8 @@ cuentos <- Corpus(VectorSource(cuentos_lematizados))
 
 # Convertimos el corpus lematizado a vector de texto
 textos_lem <- sapply(cuentos, as.character)
+
+cat("Generando n-gramas...\n")
 
 # Generamos n-gramas de 1, 2 y 3 palabras
 tokens_unigramas <- tokenize_words(textos_lem)
@@ -201,16 +228,87 @@ tokens_combinados <- mapply(function(u, b, t) {
 # Volvemos al formato Corpus para continuar el pipeline
 cuentos <- Corpus(VectorSource(tokens_combinados))
 
+cat("Creando matriz documento-término...\n")
+
 # Tokenizar (crear matriz documentos)
-dtm_cuentos<-DocumentTermMatrix(cuentos)
+dtm_cuentos <- DocumentTermMatrix(cuentos)
+
+cat("Dimensiones DTM original:", dim(dtm_cuentos), "\n")
 
 # Quitar sparsity; quitar palabras que no están en 90% docs
 dtm_cuentos <- removeSparseTerms(dtm_cuentos, sparse = 0.90)
 
+cat("Dimensiones DTM después de sparse removal:", dim(dtm_cuentos), "\n")
+
+# Crear directorio si no existe
+dir.create("stores", showWarnings = FALSE)
+
 # Exportar a stores
 saveRDS(dtm_cuentos, file = "stores/dtm_cuentos.rds")
 
+cat("Proceso completado. DTM guardada en stores/dtm_cuentos.rds\n")
+cat("Documentos finales:", nrow(dtm_cuentos), "\n")
+cat("Vocabulario final:", ncol(dtm_cuentos), "términos\n")
 
+# =============================================================
+# MOSTRAR MÉTRICAS EN PANTALLA
+# Agregar al final de tu pipeline (después de crear dtm_cuentos)
+# =============================================================
 
+cat("\n===============================================\n")
+cat("           MÉTRICAS DEL PIPELINE\n")
+cat("===============================================\n")
 
+# 1. Obtener DTM original para comparar
+dtm_original <- DocumentTermMatrix(cuentos)
 
+# 2. Extraer números clave
+docs_finales <- nrow(dtm_cuentos)
+terminos_finales <- ncol(dtm_cuentos)
+terminos_originales <- ncol(dtm_original)
+reduccion_absoluta <- terminos_originales - terminos_finales
+reduccion_pct <- round((reduccion_absoluta / terminos_originales) * 100, 1)
+
+# 3. Top términos
+frecuencias <- colSums(as.matrix(dtm_cuentos))
+top_terminos <- sort(frecuencias, decreasing = TRUE)
+
+# 4. Sparsity real
+sparsity_real <- round((1 - sum(dtm_cuentos > 0) / (docs_finales * terminos_finales)) * 100, 1)
+
+# 5. MOSTRAR TABLA PRINCIPAL
+cat("DIMENSIONES Y REDUCCIÓN:\n")
+cat("========================\n")
+cat("Documentos finales:              ", docs_finales, "\n")
+cat("Términos originales:             ", terminos_originales, "\n") 
+cat("Términos finales:                ", terminos_finales, "\n")
+cat("Términos eliminados:             ", reduccion_absoluta, "\n")
+cat("Reducción vocabulario:           ", reduccion_pct, "%\n")
+cat("Sparsity aplicada:               90%\n")
+cat("Sparsity real resultante:        ", sparsity_real, "%\n")
+
+# 6. MOSTRAR TOP TÉRMINOS
+cat("\nTOP 10 TÉRMINOS MÁS FRECUENTES:\n")
+cat("===============================\n")
+for(i in 1:min(10, length(top_terminos))) {
+  cat(sprintf("%2d. %-15s (%3d docs)\n", i, names(top_terminos)[i], top_terminos[i]))
+}
+
+# 7. TEXTO LISTO PARA REPORTE
+cat("\n===============================================\n")
+cat("           TEXTO PARA TU REPORTE\n")
+cat("===============================================\n")
+
+texto_reporte <- sprintf(
+  "La matriz documento-término final presenta dimensiones de %d documentos × %d términos tras aplicar un umbral de sparsity del 90%%. El vocabulario se redujo de %d a %d términos únicos, representando una disminución del %s%% que optimiza la representación semántica. Los términos más frecuentes post-procesamiento son: %s.",
+  docs_finales,
+  terminos_finales,
+  terminos_originales, 
+  terminos_finales,
+  reduccion_pct,
+  paste(names(top_terminos)[1:5], collapse = ", ")
+)
+
+cat(texto_reporte, "\n")
+
+cat("\n===============================================\n")
