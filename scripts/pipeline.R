@@ -20,7 +20,7 @@
 # Buenas prácticas
 rm(list = ls())
 
-setwd("~/Desktop/Taller 1 - BigData")
+#setwd("~/Desktop/Taller 1 - BigData")
 
 # Librerías
 require(pacman)
@@ -237,6 +237,22 @@ cat("Dimensiones DTM original:", dim(dtm_cuentos), "\n")
 
 # Quitar sparsity; quitar palabras que no están en 90% docs
 dtm_cuentos <- removeSparseTerms(dtm_cuentos, sparse = 0.90)
+
+db_raw <- read.csv("blog_casciari.csv", stringsAsFactors = FALSE)
+
+# Asegura que #docs coincida
+stopifnot(nrow(dtm_cuentos) == nrow(db_raw))
+
+# Títulos únicos por si hay duplicados
+titles <- make.unique(as.character(db_raw$titulo))
+
+# Asigna los títulos como nombres de documento
+dtm_cuentos$dimnames$Docs <- titles
+
+# (opcional) guarda metadatos alineados
+dir.create("stores", showWarnings = FALSE)
+saveRDS(tibble(titulo = titles), "stores/meta_cuentos.rds")
+
 
 cat("Dimensiones DTM después de sparse removal:", dim(dtm_cuentos), "\n")
 
