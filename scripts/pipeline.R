@@ -128,32 +128,10 @@ texto_df <- data.frame(
 #     + stopwords normalizadas + argentinismos
 # -------------------------------------------------------------
 
-
-# Quitar puntuacion, números, espacios dobles, y pasar todo a minuscula
-cuentos <- tm_map(cuentos,content_transformer(removePunctuation))
-cuentos <- tm_map(cuentos,content_transformer(removeNumbers))
-cuentos <- tm_map(cuentos,content_transformer(stripWhitespace))
-cuentos <- tm_map(cuentos, content_transformer(tolower)) 
-
 # Lista stopwords español de dos fuentes diferentes y combinamos
 lista_palabras1 <- stopwords(language = "es", source = "snowball")
 lista_palabras2 <- stopwords(language = "es", source = "nltk")
 lista_palabras <- union(lista_palabras1, lista_palabras2)
-
-cuentos<-tm_map(cuentos, removeWords, lista_palabras)
-
-# Definir transformador general para reemplazar texto
-toWord <- content_transformer(function(x, pattern, replacement) {
-  gsub(pattern, replacement, x, ignore.case = TRUE)
-})
-
-# Aplicar transformaciones con expresiones regulares
-cuentos <- tm_map(cuentos, toWord, "\\bChirri\\b", "amigo")
-cuentos <- tm_map(cuentos, toWord, "\\bNina\\b", "hija")
-cuentos <- tm_map(cuentos, toWord, "\\bMercedes\\b", "hogar")
-cuentos <- tm_map(cuentos, toWord, "\\bTotin\\b", "perro")
-cuentos <- tm_map(cuentos, toWord, "\\bCristina\\b", "esposa")
-
 
 cat("Procesando", nrow(texto_df), "documentos con udpipe...\n")
 anotaciones <- udpipe_annotate(ud_model, x = texto_df$texto)
@@ -184,7 +162,7 @@ lista_palabras <- unique(c(
 ))
 
 # También quita argentinismos si quieres neutralizarlos
-#lista_stop_extra <- unique(c(lista_palabras, palabras_filt))
+lista_stop_extra <- unique(c(lista_palabras))
 
 # Aplica stopwords y borra vacíos
 anotaciones <- anotaciones %>%
@@ -212,6 +190,30 @@ tokens_combinados <- mapply(function(u, b, t) {
 
 # Corpus final (normalizado, sin tildes, con n-gramas)
 cuentos <- Corpus(VectorSource(tokens_combinados))
+
+
+cuentos<-tm_map(cuentos, removeWords, lista_palabras)
+
+
+# Quitar puntuacion, números, espacios dobles, y pasar todo a minuscula
+cuentos <- tm_map(cuentos,content_transformer(removePunctuation))
+cuentos <- tm_map(cuentos,content_transformer(removeNumbers))
+cuentos <- tm_map(cuentos,content_transformer(stripWhitespace))
+cuentos <- tm_map(cuentos, content_transformer(tolower)) 
+
+
+# Definir transformador general para reemplazar texto
+toWord <- content_transformer(function(x, pattern, replacement) {
+  gsub(pattern, replacement, x, ignore.case = TRUE)
+})
+
+# Aplicar transformaciones con expresiones regulares
+cuentos <- tm_map(cuentos, toWord, "\\bChirri\\b", "amigo")
+cuentos <- tm_map(cuentos, toWord, "\\bNina\\b", "hija")
+cuentos <- tm_map(cuentos, toWord, "\\bMercedes\\b", "hogar")
+cuentos <- tm_map(cuentos, toWord, "\\bTotin\\b", "perro")
+cuentos <- tm_map(cuentos, toWord, "\\bCristina\\b", "esposa")
+
 
 # Limpieza adicional de casos específicos (ejemplo miniserie de TV)
 toTV <- content_transformer(function(x, pattern) gsub(pattern, "tv", x))
