@@ -81,7 +81,7 @@ recomendador_tfidf <- function(title, distancias = cosine_sim, df = db) {
   recomendaciones <- recomendaciones %>% arrange(desc(dist))
   
   # Retornar los 10 cuentos más similares (excluyendo el mismo)
-  return(recomendaciones)
+  return(recomendaciones$titulo[1:11])
 }
 
 # Ejemplo de uso
@@ -116,7 +116,7 @@ for (k in grid) {
 }
 
 # TODO: cambiar el # de la "K" para cambiar el modelo
-cuentos_lda <- modelos_lda$K7
+cuentos_lda <- modelos_lda$K3
 
 
 # =============================================================
