@@ -20,7 +20,7 @@
 # =============================================================
 
 # Buenas prácticas
-rm(list = ls())
+#rm(list = ls())
 
 # NOTA: CAMBIAR DIRECTORIO
 # setwd("C:/Users/Asuar/OneDrive/Escritorio/Libros Clases/Economía/Ciencia Datos y Econometria/Taller3-blog_casciari")
@@ -31,7 +31,7 @@ p_load(tidyverse, stringr, dplyr, tm, proxy, maptpx, tidytext) #TODO para proces
 
 # Datos y primera visualización
 cuentos <- readRDS("stores/dtm_cuentos.rds") # cuentos procesados
-db <- read.csv("stores/blog_casciari.csv") # db original para cuentos 
+db <- read.csv("blog_casciari.csv") # db original para cuentos 
 
 # A los cuentos origionales quitar salto página; no aporta nada
 # Quitar "/n" y reemplazar por espacio
@@ -78,10 +78,10 @@ recomendador_tfidf <- function(title, distancias = cosine_sim, df = db) {
   )
   
   # Ordenar de mayor a menor similitud
-  recomendaciones <- recomendaciones %>% arrange(desc(-dist))
+  recomendaciones <- recomendaciones %>% arrange(desc(dist))
   
   # Retornar los 10 cuentos más similares (excluyendo el mismo)
-  return(recomendaciones$titulo[2:11])
+  return(recomendaciones)
 }
 
 # Ejemplo de uso
@@ -116,7 +116,7 @@ for (k in grid) {
 }
 
 # TODO: cambiar el # de la "K" para cambiar el modelo
-cuentos_lda <- modelos_lda$K3
+cuentos_lda <- modelos_lda$K7
 
 
 # =============================================================

@@ -1,106 +1,92 @@
 # =============================================================
-# Pipeline: este archivo es la primera parte de proyecto de 
-#            desarrollo para un recomendador de cuentos del
-#            escritor Hernán Casciari. Aquí desarrollamos el
-#            pipeline de los datos, obteniéndolos de la DB
-#            para su procesamiento correcto en pos de emplearlos
-#            como insumo para el recomendador.
-#
-# 1) Buenas prácticas, librerías y descarga de datos 
-# 2) Análisis cuentos pre-procesamiento
-# 3) Web scrapping stopwords argentinas
-# 4) Procesamiento cuentos a tokens
-# 
+# Pipeline: Recomendador Casciari (Parte 1 - Pipeline de datos)
 # =============================================================
 
-# =============================================================
-# 1) Buenas prácticas, librerías y descarga de datos
-# =============================================================
-
-# Buenas prácticas
+# -------------------------------------------------------------
+# 1) Buenas prácticas, librerías y helpers
+# -------------------------------------------------------------
 rm(list = ls())
-
-#setwd("~/Desktop/Taller 1 - BigData")
+# setwd("~/Desktop/Taller 1 - BigData")  # <- ajusta si lo necesitas
 
 # Librerías
-require(pacman)
-p_load(tidyverse, stringr, dplyr, stringi, tm, stopwords, tokenizers) #TODO para procesar data
-p_load(rvest, udpipe) # para web scrapping
+if (!require(pacman)) install.packages("pacman")
+pacman::p_load(
+  tidyverse, stringr, dplyr, stringi, tm, stopwords, tokenizers,
+  rvest, udpipe
+)
 
-# Datos y primera visualización
-db <- read.csv("blog_casciari.csv")
+# ---- Helper de normalización: minúsculas + sin tildes + limpio ----
+normalize_plain <- function(x) {
+  x <- stringi::stri_trans_general(x, "Latin-ASCII")
+  x <- tolower(x)
+  x <- gsub("[^a-z0-9\\s]", " ", x, perl = TRUE)  # quita signos no alfanuméricos
+  x <- gsub("\\s+", " ", x)
+  trimws(x)
+}
+
+# -------------------------------------------------------------
+# 2) Carga de datos y primeras miradas
+# -------------------------------------------------------------
+db <- read.csv("blog_casciari.csv", stringsAsFactors = FALSE)
 head(db)
 
-
-# =============================================================
-# 2) Análisis  cuentos pre-procesamiento
-# =============================================================
-
-# Ver final de cada cuento (últimas 5)
+# Ver últimas 5 palabras de cada cuento (pueden ser firma/fecha)
 sapply(str_split(db$cuento, "\\s+"), function(x) paste(tail(x, 5), collapse = " "))
 
-
-# Ver distribución tamaño string
-# TODO ponerlo más lindo
+# Histograma de largo (caracteres)
 db %>%
   mutate(largo = nchar(cuento)) %>%
   ggplot(aes(x = largo)) +
   geom_histogram(bins = 30) +
-  labs(title = "Distribución del tamaño de los cuentos (caracteres)",
-       x = "Número de caracteres", y = "Frecuencia")
+  labs(
+    title = "Distribución del tamaño de los cuentos (caracteres)",
+    x = "Número de caracteres", y = "Frecuencia"
+  )
 
-# Cambiar formato fecha
+# Fechas a Date
 db <- db %>%
   mutate(fecha = as.Date(fecha, format = "%m/%d/%y"))
 
-# Ver distribución por fecha
 db %>%
   ggplot(aes(x = fecha)) +
   geom_histogram(binwidth = 30, fill = "orange", color = "black") +
-  labs(title = "Distribución de cuentos por fecha",
-       x = "Fecha", y = "Número de cuentos")
+  labs(
+    title = "Distribución de cuentos por fecha",
+    x = "Fecha", y = "Número de cuentos"
+  )
 
-# Son todos cuentos independientes? Hoy hay secuelas o continuaciones?
-
-
-# =============================================================
-# Web scrapping stopwords argentinas
-# =============================================================
-
-# Leer la página web con manejo de errores
+# -------------------------------------------------------------
+# 3) Web scraping de argentinismos -> lista normalizada
+# -------------------------------------------------------------
 tryCatch({
   url <- "https://www.lifeder.com/frases-palabras-argentinas/"
-  
-  # Si esta URL falla, podrías usar otra fuente de expresiones argentinas:
-  # url <- "https://languagetool.org/insights/es/publicacion/palabras-argentinas/"
-  
   page <- read_html(url)
-  
-  # Extraer los nodos que contienen las palabras/expresiones
   palabras_raw <- page %>%
-    html_nodes("strong, b") %>%      # selecciona etiquetas strong o b
+    html_nodes("strong, b") %>%
     html_text() %>%
     str_trim()
-  
-  # Filtrar y procesar; minuscula, duplicados, puntuación, 
+
   palabras_filt <- palabras_raw %>%
     tolower() %>%
     unique() %>%
-    # quitar puntuación
     str_replace_all("[[:punct:]]", "") %>%
-    .[. != ""]  # eliminar strings vacíos
-  
+    .[. != ""]
+  # Normaliza (sin tildes)
+  palabras_filt <- normalize_plain(palabras_filt)
+
   cat("Palabras argentinas extraídas:", length(palabras_filt), "\n")
-  
 }, error = function(e) {
   cat("Error en web scraping, usando lista predefinida\n")
-  # Lista de backup con expresiones argentinas comunes
-  palabras_filt <- c("che", "boludo", "pibe", "mina", "laburo", "guita", "quilombo", 
-                     "bondi", "fiaca", "chabon", "mango", "faso", "morfi", "birra")
+  palabras_filt <- c(
+    "che","boludo","pibe","mina","laburo","guita","quilombo",
+    "bondi","fiaca","chabon","mango","faso","morfi","birra"
+  )
+  palabras_filt <- normalize_plain(palabras_filt)
 })
 
-# Lematización usando udpipe
-# Descargar y cargar modelo español (verificar si ya existe)
+# -------------------------------------------------------------
+# 4) Modelo de udpipe (español)
+# -------------------------------------------------------------
 if(!file.exists("spanish-gsd-ud-2.5-191206.udpipe")) {
   cat("Descargando modelo udpipe español...\n")
   ud_model_file <- udpipe_download_model(language = "spanish")
@@ -110,52 +96,38 @@ if(!file.exists("spanish-gsd-ud-2.5-191206.udpipe")) {
   ud_model <- udpipe_load_model("spanish-gsd-ud-2.5-191206.udpipe")
 }
 
-# Crear data frame para lematizar
-df_arg <- data.frame(token = palabras_filt, stringsAsFactors = FALSE)
+# -------------------------------------------------------------
+# 5) Preprocesamiento de texto previo a udpipe
+#     - quitar firma/fecha del final (últimas 5 palabras)
+#     - limpiar saltos de línea
+#     - (NO quitamos stopwords aquí; lo haremos después de lematizar)
+# -------------------------------------------------------------
+# Quitar saltos de línea
+cuentos_raw <- str_replace_all(db$cuento, "\n", " ")
 
-anot_arg <- udpipe_annotate(ud_model, x = df_arg$token)
-anot_arg <- as.data.frame(anot_arg)
+# Quitar últimas 5 palabras (firma/fecha)
+cuentos_raw <- sapply(str_split(cuentos_raw, "\\s+"), function(x) {
+  paste(head(x, max(0, length(x) - 5)), collapse = " ")
+})
 
-# Tomar el lemma de cada token
-palabras_lemma <- anot_arg %>%
-  select(token, lemma) %>%
-  distinct() %>%
-  mutate(lemma = ifelse(is.na(lemma) | lemma == "", token, lemma)) %>%
-  pull(lemma) %>%
-  unique()
+# Corpus básico (aún sin remover stopwords)
+corpus_inicial <- Corpus(VectorSource(cuentos_raw))
+corpus_inicial <- tm_map(corpus_inicial, content_transformer(removePunctuation))
+corpus_inicial <- tm_map(corpus_inicial, content_transformer(removeNumbers))
+corpus_inicial <- tm_map(corpus_inicial, content_transformer(stripWhitespace))
+corpus_inicial <- tm_map(corpus_inicial, content_transformer(tolower))
 
-# Resultado final en una lista
-stopwords_arg <- palabras_lemma
+# Convierte a data.frame para anotar
+texto_df <- data.frame(
+  texto = sapply(corpus_inicial, as.character),
+  stringsAsFactors = FALSE
+)
 
-# Ver primeras 20
-head(stopwords_arg, 20)
+# -------------------------------------------------------------
+# 6) Lematización con udpipe + filtrado POS + normalización
+#     + stopwords normalizadas + argentinismos
+# -------------------------------------------------------------
 
-
-# =============================================================
-# Procesamiento cuentos a tokens
-# =============================================================
-
-# Falta:
-# - Lematización (revisar, no cambia mucho)
-# - Quitar nombres (revisar importantes, como Chirri->amigo, Nina->hija, 
-#     Mercedes->hogar/casa, Totin->perro, Cristina->esposa)
-# - Quitar palabras argentinas (puede o no, depende si al final hay suficientes palabras)
-#   - Web scapping de página (procesar minusculas, acentos y eso)
-# - Preguntar Ignacio si cuentos muy largos afectan
-# - Web scrapping para etiquetas y así sacar temas
-#   - Esto podría llevar a enfoque k-means
-
-# Eliminamos tildes y caracteres especiales del español
-cuentos <- stri_trans_general(str = db$cuento, id = "Latin-ASCII")
-
-# Quitar "/n" y reemplazar por espacio
-cuentos <- str_replace_all(cuentos, "\n"," ")
-
-# Quitar últimas 5 palabras, pues son nombre autor y fecha
-cuentos <- sapply(str_split(cuentos, "\\s+"), function(x) paste(head(x, -5), collapse = " "))
-
-# Volver strings en objetos tipo Corpus para funciones con la librería
-cuentos <- Corpus(VectorSource(cuentos))
 
 # Quitar puntuacion, números, espacios dobles, y pasar todo a minuscula
 cuentos <- tm_map(cuentos,content_transformer(removePunctuation))
@@ -168,163 +140,175 @@ lista_palabras1 <- stopwords(language = "es", source = "snowball")
 lista_palabras2 <- stopwords(language = "es", source = "nltk")
 lista_palabras <- union(lista_palabras1, lista_palabras2)
 
-# TODO: podría quitarse nombres o cosas recurrentes
-# (Nombres buscar palabras empiezan mayúsculas y revisar) (revisar todos terminan con Hérnan Casciari)
-# También lenguaje argento
-# Agregamos palabras específica
-lista_palabras <- c(lista_palabras,"mientras")
 cuentos<-tm_map(cuentos, removeWords, lista_palabras)
 
-# TODO cambiar esta parte
-# Expresiones regulares para cambiar "miniseriedeTV" por "miniserie tv"
-toTV <- content_transformer(function(x, pattern) {return (gsub(pattern, 'tv', x))})
+# Definir transformador general para reemplazar texto
+toWord <- content_transformer(function(x, pattern, replacement) {
+  gsub(pattern, replacement, x, ignore.case = TRUE)
+})
 
-# CORRECCIÓN DEL ERROR: Cambiar 'sinopsis' por 'cuentos'
-cuentos <- tm_map(cuentos, toTV, "miniseriedetv")
-cuentos <- tm_map(cuentos, toTV, "miniserie tv")
+# Aplicar transformaciones con expresiones regulares
+cuentos <- tm_map(cuentos, toWord, "\\bChirri\\b", "amigo")
+cuentos <- tm_map(cuentos, toWord, "\\bNina\\b", "hija")
+cuentos <- tm_map(cuentos, toWord, "\\bMercedes\\b", "hogar")
+cuentos <- tm_map(cuentos, toWord, "\\bTotin\\b", "perro")
+cuentos <- tm_map(cuentos, toWord, "\\bCristina\\b", "esposa")
 
-# Verificar contenido (ajustar índice si hay menos de 101 documentos)
-if(length(cuentos) >= 101) {
-  cuentos[[101]]$content
-} else {
-  cat("Menos de 101 documentos. Mostrando el último:\n")
-  print(cuentos[[length(cuentos)]]$content)
-}
-
-# Lematizar (TODO: modelo de udp ya descargado sección previa)
-# Convertir corpus a data.frame temporal
-texto_df <- data.frame(texto = sapply(cuentos, as.character), stringsAsFactors = FALSE)
 
 cat("Procesando", nrow(texto_df), "documentos con udpipe...\n")
-
-# Procesar con udpipe
 anotaciones <- udpipe_annotate(ud_model, x = texto_df$texto)
 anotaciones <- as.data.frame(anotaciones)
 
-# Usar solo las lemas (en minúsculas)
+# Filtra categorías poco informativas
+filtro_upos <- c("PRON","DET","AUX","PART","ADP","CCONJ","SCONJ","PUNCT","SYM","NUM","X")
+anotaciones <- anotaciones %>%
+  filter(!(upos %in% filtro_upos))
+
+# Usa lemma si existe; si no, token
+anotaciones <- anotaciones %>%
+  mutate(lemma = ifelse(is.na(lemma) | lemma == "", token, lemma))
+
+# Normaliza lemmas (sin tildes, minúsculas, limpio)
+anotaciones$lemma <- normalize_plain(anotaciones$lemma)
+
+# Stopwords (unión de dos fuentes) normalizadas
+lista_palabras1 <- stopwords(language = "es", source = "snowball")
+lista_palabras2 <- stopwords(language = "es", source = "nltk")
+lista_palabras <- union(lista_palabras1, lista_palabras2)
+lista_palabras <- normalize_plain(lista_palabras)
+
+# Añade propias/funcionales que puedan colarse
+lista_palabras <- unique(c(
+  lista_palabras, "el", "la", "los", "las", "decir", "hacer", "tener"
+  , "vez", "ver"
+))
+
+# También quita argentinismos si quieres neutralizarlos
+#lista_stop_extra <- unique(c(lista_palabras, palabras_filt))
+
+# Aplica stopwords y borra vacíos
+anotaciones <- anotaciones %>%
+  filter(!(lemma %in% lista_stop_extra),
+         lemma != "")
+
+
+# Reconstruye textos lematizados y normalizados por doc
 cuentos_lematizados <- anotaciones %>%
   group_by(doc_id) %>%
   summarise(texto = paste(lemma, collapse = " "), .groups = "drop") %>%
   pull(texto)
 
-# Volver a objeto Corpus
-cuentos <- Corpus(VectorSource(cuentos_lematizados))
-
-# Convertimos el corpus lematizado a vector de texto
-textos_lem <- sapply(cuentos, as.character)
-
+# -------------------------------------------------------------
+# 7) N-gramas (1-3) a partir de textos ya normalizados
+# -------------------------------------------------------------
 cat("Generando n-gramas...\n")
+tokens_unigramas <- tokenize_words(cuentos_lematizados)
+tokens_bigramas  <- tokenize_ngrams(cuentos_lematizados, n = 2)
+tokens_trigramas <- tokenize_ngrams(cuentos_lematizados, n = 3)
 
-# Generamos n-gramas de 1, 2 y 3 palabras
-tokens_unigramas <- tokenize_words(textos_lem)
-tokens_bigramas  <- tokenize_ngrams(textos_lem, n = 2)
-tokens_trigramas <- tokenize_ngrams(textos_lem, n = 3)
-
-# Combinamos todos los tokens en un solo texto por documento
 tokens_combinados <- mapply(function(u, b, t) {
   paste(c(u, b, t), collapse = " ")
 }, tokens_unigramas, tokens_bigramas, tokens_trigramas)
 
-# Volvemos al formato Corpus para continuar el pipeline
+# Corpus final (normalizado, sin tildes, con n-gramas)
 cuentos <- Corpus(VectorSource(tokens_combinados))
 
+# Limpieza adicional de casos específicos (ejemplo miniserie de TV)
+toTV <- content_transformer(function(x, pattern) gsub(pattern, "tv", x))
+cuentos <- tm_map(cuentos, toTV, "miniseriedetv")
+cuentos <- tm_map(cuentos, toTV, "miniserie tv")
+
+# (Opcional) inspección
+if(length(cuentos) >= 1) {
+  cat("Ejemplo documento 1 (1000 chars):\n",
+      substr(cuentos[[1]]$content, 1, 1000), "\n\n")
+}
+
+# -------------------------------------------------------------
+# 8) Matriz Documento-Término (DTM) y sparsity
+# -------------------------------------------------------------
 cat("Creando matriz documento-término...\n")
-
-# Tokenizar (crear matriz documentos)
 dtm_cuentos <- DocumentTermMatrix(cuentos)
+cat("Dimensiones DTM original:", paste(dim(dtm_cuentos), collapse = " x "), "\n")
 
-cat("Dimensiones DTM original:", dim(dtm_cuentos), "\n")
-
-# Quitar sparsity; quitar palabras que no están en 90% docs
+# Quitar términos muy escasos (sparsity <= 0.90 -> presentes ≥10% docs)
 dtm_cuentos <- removeSparseTerms(dtm_cuentos, sparse = 0.90)
 
+# Releer original para metadata de títulos
 db_raw <- read.csv("blog_casciari.csv", stringsAsFactors = FALSE)
 
 # Asegura que #docs coincida
 stopifnot(nrow(dtm_cuentos) == nrow(db_raw))
 
-# Títulos únicos por si hay duplicados
+# Títulos únicos para docnames
 titles <- make.unique(as.character(db_raw$titulo))
-
-# Asigna los títulos como nombres de documento
 dtm_cuentos$dimnames$Docs <- titles
 
-# (opcional) guarda metadatos alineados
+# Guarda metadatos
 dir.create("stores", showWarnings = FALSE)
 saveRDS(tibble(titulo = titles), "stores/meta_cuentos.rds")
 
+cat("Dimensiones DTM después de sparse removal:",
+    paste(dim(dtm_cuentos), collapse = " x "), "\n")
 
-cat("Dimensiones DTM después de sparse removal:", dim(dtm_cuentos), "\n")
-
-# Crear directorio si no existe
-dir.create("stores", showWarnings = FALSE)
-
-# Exportar a stores
+# Exporta DTM
 saveRDS(dtm_cuentos, file = "stores/dtm_cuentos.rds")
-
 cat("Proceso completado. DTM guardada en stores/dtm_cuentos.rds\n")
-cat("Documentos finales:", nrow(dtm_cuentos), "\n")
-cat("Vocabulario final:", ncol(dtm_cuentos), "términos\n")
 
-# =============================================================
-# MOSTRAR MÉTRICAS EN PANTALLA
-# Agregar al final de tu pipeline (después de crear dtm_cuentos)
-# =============================================================
-
+# -------------------------------------------------------------
+# 9) Métricas y resumen para reporte
+# -------------------------------------------------------------
 cat("\n===============================================\n")
 cat("           MÉTRICAS DEL PIPELINE\n")
 cat("===============================================\n")
 
-# 1. Obtener DTM original para comparar
+# DTM original (sobre el mismo 'cuentos' final sin sparsity)
 dtm_original <- DocumentTermMatrix(cuentos)
 
-# 2. Extraer números clave
-docs_finales <- nrow(dtm_cuentos)
-terminos_finales <- ncol(dtm_cuentos)
-terminos_originales <- ncol(dtm_original)
-reduccion_absoluta <- terminos_originales - terminos_finales
-reduccion_pct <- round((reduccion_absoluta / terminos_originales) * 100, 1)
+docs_finales        <- nrow(dtm_cuentos)
+terminos_finales     <- ncol(dtm_cuentos)
+terminos_originales  <- ncol(dtm_original)
+reduccion_absoluta   <- terminos_originales - terminos_finales
+reduccion_pct        <- round((reduccion_absoluta / terminos_originales) * 100, 1)
 
-# 3. Top términos
+# Frecuencias de términos en la DTM final
 frecuencias <- colSums(as.matrix(dtm_cuentos))
 top_terminos <- sort(frecuencias, decreasing = TRUE)
 
-# 4. Sparsity real
-sparsity_real <- round((1 - sum(dtm_cuentos > 0) / (docs_finales * terminos_finales)) * 100, 1)
+# Sparsity real (porcentaje de ceros)
+mat_bin <- as.matrix(dtm_cuentos) > 0
+sparsity_real <- round((1 - sum(mat_bin) / (docs_finales * terminos_finales)) * 100, 1)
 
-# 5. MOSTRAR TABLA PRINCIPAL
 cat("DIMENSIONES Y REDUCCIÓN:\n")
 cat("========================\n")
 cat("Documentos finales:              ", docs_finales, "\n")
-cat("Términos originales:             ", terminos_originales, "\n") 
+cat("Términos originales:             ", terminos_originales, "\n")
 cat("Términos finales:                ", terminos_finales, "\n")
 cat("Términos eliminados:             ", reduccion_absoluta, "\n")
 cat("Reducción vocabulario:           ", reduccion_pct, "%\n")
 cat("Sparsity aplicada:               90%\n")
 cat("Sparsity real resultante:        ", sparsity_real, "%\n")
 
-# 6. MOSTRAR TOP TÉRMINOS
 cat("\nTOP 10 TÉRMINOS MÁS FRECUENTES:\n")
 cat("===============================\n")
-for(i in 1:min(10, length(top_terminos))) {
-  cat(sprintf("%2d. %-15s (%3d docs)\n", i, names(top_terminos)[i], top_terminos[i]))
+n_top <- min(10, length(top_terminos))
+for(i in 1:n_top) {
+  cat(sprintf("%2d. %-20s %8d\n", i, names(top_terminos)[i], top_terminos[i]))
 }
 
-# 7. TEXTO LISTO PARA REPORTE
 cat("\n===============================================\n")
 cat("           TEXTO PARA TU REPORTE\n")
 cat("===============================================\n")
 
 texto_reporte <- sprintf(
-  "La matriz documento-término final presenta dimensiones de %d documentos × %d términos tras aplicar un umbral de sparsity del 90%%. El vocabulario se redujo de %d a %d términos únicos, representando una disminución del %s%% que optimiza la representación semántica. Los términos más frecuentes post-procesamiento son: %s.",
+  "La matriz documento-término final presenta dimensiones de %d documentos × %d términos tras aplicar un umbral de sparsity del 90%%. El vocabulario se redujo de %d a %d términos únicos (−%s%%). Los términos más frecuentes post-procesamiento son: %s.",
   docs_finales,
   terminos_finales,
-  terminos_originales, 
+  terminos_originales,
   terminos_finales,
   reduccion_pct,
-  paste(names(top_terminos)[1:5], collapse = ", ")
+  paste(names(top_terminos)[1:min(5, length(top_terminos))], collapse = ", ")
 )
 
 cat(texto_reporte, "\n")
-
 cat("\n===============================================\n")
